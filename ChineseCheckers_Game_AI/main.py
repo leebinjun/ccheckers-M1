@@ -1,0 +1,173 @@
+from board import *
+from utils import *
+import time
+import cv2
+import vision
+
+
+from pydobot import Dobot
+
+
+# 连接机械臂
+global device
+device = Dobot(port='com6', verbose=False)
+time.sleep(0.5)
+device.speed(1)
+device._get_pose()
+
+# 位置初始化
+device.go_init_pos()
+
+
+
+def text_objects(text, font):
+    textSurface = font.render(text, True, black)
+    return textSurface, textSurface.get_rect()
+
+
+def message_display(text, x, y, size):
+    largeText = pygame.font.Font('freesansbold.ttf', size)
+    TextSurf, TextRect = text_objects(text, largeText)
+    TextRect.center = (x, y)
+    screen.blit(TextSurf, TextRect)
+
+    pygame.display.update()
+
+
+def game_end(winner):
+    if winner is human:
+        message_display('You win!', 800, 100, 50)
+    else:
+        message_display('You lose!', 800, 100, 50)
+
+
+def button(text, x, y, w, h, light_color, color, action=None):
+    mouse = pygame.mouse.get_pos()
+    click = pygame.mouse.get_pressed()
+
+    if x + w > mouse[0] > x and y + h > mouse[1] > y:
+        pygame.draw.rect(screen, light_color, (x, y, w, h))
+        if click[0] == 1 and action != None:
+            if action == "Start":
+                game_loop()
+            elif action == "Quit":
+                pygame.quit()
+                quit()
+    else:
+        pygame.draw.rect(screen, color, (x, y, w, h))
+
+    smallText = pygame.font.Font('freesansbold.ttf', 20)
+    TextSurf, TextRect = text_objects(text, smallText)
+    TextRect.center = ((x + (w / 2)), (y + (h / 2)))
+    screen.blit(TextSurf, TextRect)
+
+
+def game_intro():
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+
+        screen.fill(white)
+        largeText = pygame.font.Font('freesansbold.ttf', 50)
+        TextSurf, TextRect = text_objects("Chinese Checkers", largeText)
+        TextRect.center = (960/2, 200)
+        screen.blit(TextSurf, TextRect)
+
+        button("Start", 250, 350, 100, 50, light_red, red, "Start")
+        button("Quit", 650, 350, 100, 50, light_blue, blue, "Quit")
+
+        pygame.display.update()
+
+
+def game_loop():
+    draw_board()
+    init_checkers()
+    selected_checker = None
+    turn = 0
+    ai_count = 0
+    human_count = 0
+    ai_time = 0
+
+    ret,img = vision.cap.read()
+
+
+    while True:
+        move_string = "move count: " + str(human_count)
+        screen.fill(white, (30, 140, 150, 40))
+        message_display(move_string, 100, 150, 20)
+        if ai_time == 0:
+            time_string = "AI took:"
+        else:
+            time_string = "AI took: " + str(ai_time) + "s"
+        screen.fill(white, (20, 180, 170, 40))
+        message_display(time_string, 100, 200, 20)
+        button("Replay", 50, 50, 100, 50, light_red, red)
+        button("Quit", 180, 50, 100, 50, light_blue, blue)
+
+        if turn == 0 and no_hand():
+            ret, i_id = human.has_move()
+            if ret and turn == 0:
+                mouse_pos = human.last_move
+                # print("*************************************mouse_pos:", mouse_pos)
+                
+                human.checkers[i_id].selected()
+                selected_checker = human.checkers[i_id]
+
+                # 进入死循环，判断落子位置
+                while True:
+                    cnt = 0
+                    to_moves = None
+
+                    for i in selected_checker.moves:
+                        print("#i:", i)
+                        if get_pos_states(i) == 1:
+                            cnt += 1
+                            to_moves = i
+
+                    if cnt == 1:
+                        selected_checker.move(to_moves)
+                        human_count += 1
+                        if is_terminal(human.checkers, human_terminal):
+                            game_end(human)
+                        else:
+                            selected_checker = None
+                            turn = 1
+                        print("*************************************************************has a new move.")
+                        break
+                    
+
+        elif turn == 1:  # ai's turn to make a move
+            t0 = time.time()
+            target_pos, new_pos = ai.make_move()
+            # print(target_pos, new_pos)
+            device.from_pos1_to_pos2(target_pos, new_pos)
+            # TODO: 没有落子成功的情况
+            # if target_pos 的颜色 不是 
+            while True:
+                a = input("good action? input 0 or 1:")
+                if a not in ['0', '1']:
+                    continue
+                elif int(a) == 0:
+                    device.from_pos1_to_pos2(target_pos, new_pos)
+                else:
+                    break
+
+            ai_time = round(time.time() - t0, 2)
+            print(ai_time)
+            turn = 0
+            #ai_count += 1
+            if is_terminal(ai.checkers, ai_terminal):
+                game_end(ai)
+
+        pygame.display.update()
+        time.sleep(1)
+
+
+pygame.init() 
+init_board()
+game_intro()
+game_loop()
+pygame.quit()
+quit()
